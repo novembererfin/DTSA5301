@@ -1,0 +1,108 @@
+---
+title: "Analysis NYPD Shooting Incidents"
+date: "2022-09-02"
+output: pdf_document
+---
+
+## Introduction  
+This report is made from New York City Shooting Incidents (Historical) dataset. At this time, the dataset includes data from January 1st, 2006 to December 31st, 2021. There is information about date, time, location, perpetrator and victim. 
+There were two questions that I wanted to check:
+1. What is the overall trend over time
+2. What are the profiles of the victims regarding age group and sex
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r import_libraries}
+library(tidyverse)
+library(lubridate)
+```
+## Import data from NYC shooting episodes
+
+```{r import_data}
+
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+shooting_episodes <- read_csv(url_in, show_col_types = FALSE)
+
+```
+
+## Data summary after import
+```{r first_data_summary}
+summary(shooting_episodes)
+```
+
+## Convert dates to Date format using Lubridate and remove  some columns 
+```{r convert_dates_remove}
+shooting_episodes <- shooting_episodes %>% mutate(OCCUR_DATE=mdy(OCCUR_DATE))
+shooting_episodes <- shooting_episodes %>% select(-c(INCIDENT_KEY,JURISDICTION_CODE, X_COORD_CD, Y_COORD_CD, Latitude, Longitude, Lon_Lat))
+summary(shooting_episodes)
+```
+
+## Visualize Shooting episodes per days and trends
+```{r plot_shooting_per_day}
+shooting_per_date <- shooting_episodes %>%
+  count(OCCUR_DATE)
+most_bloody <- shooting_per_date[which.max(shooting_per_date$n),]
+paste("Date with the highest number of shooting incidents: ", most_bloody$OCCUR_DATE)  
+paste("Maximun number shooting per day: ", max(shooting_per_date$n))  
+paste("Average number of shootings per day: ", mean(shooting_per_date$n))  
+plot1 <- ggplot(shooting_per_date, mapping = aes(x = OCCUR_DATE)) +
+  geom_point(mapping = aes(y = n), color = "burlywood2") +
+  geom_point(most_bloody, mapping = aes(y = n), color = "red") +
+  geom_smooth(mapping = aes(y = n), color = "darkorchid3") +
+  labs(title = "Number of Shooting Victims per day", x = "Years", y = "Number of victims")
+plot1
+```
+  
+
+Some questions can be made:  
+
+* From the trend-line: why are shooting episodes increasing in number the last years?
+* What were the reasons from the decline in the the 2010's
+* July 5th, 2020 was a day with many shooting episodes. What happened that date?
+
+Some possible explanations could be:
+
+* Consequences of sanitary measures against COVID 19 pandemic and acceptance in different sectors in society
+* Changes in policies towards crime (policy, local anti-crime organizations, funding)
+* As the pandemic receded one could see a surge in crime in general after months of restrictions and lockdowns
+* Some extra info after the weekend of July 4th, 2021: [https://www.bbc.com/news/world-us-canada-57743694](https://www.bbc.com/news/world-us-canada-57743694)
+
+## Visualize Shooting victims sex and age group
+```{r plot_shootin_victims}
+shooting_victim <- shooting_episodes %>% 
+  count(VIC_AGE_GROUP, VIC_SEX)
+colnames(shooting_victim) <- c("Age", "Sex", "Episodes")
+shooting_victim$Sex[shooting_victim$Sex == "F"] <- "Female"
+shooting_victim$Sex[shooting_victim$Sex == "M"] <- "Male"
+shooting_victim$Sex[shooting_victim$Sex == "U"] <- "Unknown"
+
+shooting_victim$Labels <- " "
+
+shooting_victim$Labels <- ifelse(!(duplicated(shooting_victim$Age)), shooting_victim$Age, shooting_victim$Labels) 
+
+xlabels <- shooting_victim$Labels
+
+plot2 <- ggplot(shooting_victim, mapping = aes(x = interaction(Sex, Age), y = Episodes, fill = Sex)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_x_discrete("Victim age and sex",labels = xlabels ) +
+  scale_fill_brewer(palette="Paired") + 
+  labs(title = "Number of Shooting Victims per age group and sex", y = "Number of victims", col = "Victim's Sex") +
+  scale_color_manual(labels = c("Female", "Male", "Unknown"))
+plot2
+```
+  
+  
+## Bias and Conclusion
+  
+### Bias    
+There are several possible bias that one could list:  
+1. On the data itself: when I analized the data regarding victim sex, it is remarkable to find "U" only in certain age groups. What does that mean and what does U represent? I called is "Unknown" in my graph labels   
+2. Omission: is there other variables that has been omitted and could have been more helpful to understand this problem  
+3. Personal: I was expecting that male victims were over represented in the statistics. Both because I have the impression that men have bigger chances to get into violent episodes, been outside more, etc.   
+
+### Conclusion  
+
+Trend: After a decline from the first half of the 2010's, a significant increase of shooting episodes can be seen the last couple of years  
+
+Victims: Men are definitely overrepresented in the victim statistics and the most common victim is between 25-44 years old
