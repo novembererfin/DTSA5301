@@ -1,0 +1,210 @@
+---
+title: "Final COVID 19 - Norway"
+output: pdf_document
+date: "2022-09-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r import_libraries}
+library(tidyverse)
+library(lubridate)
+```
+## Introduction
+### Questions of interest
+I want to explore how temperature affects incidence of new Covid 19 cases in Oslo, Norway. My expectations before analyzing the data is that until certain point, lower temperatures will increase the incidence of new cases of Covid 19, but further decrease will result in less contact between people (avoiding going out at very cold weather) and less infections. 
+
+I am aware that the number of new infections depends on many other factors. 
+
+### Data description  
+For this purpose I am going to use two datasets:  
+1. A confirmed cases dataset from Johns Hopkins University  
+2. A dataset from the Meteorologisk Institutt about average temperature in Oslo, Norway  
+  
+## Import data
+
+Brief description:  
+For this analysis I am using data from the CSSE github repository Time Series about Confirmed cases - Global 
+[https://github.com/CSSEGISandData/COVID-19/tree/master/csse_covid_19_data/csse_covid_19_time_series](https://github.com/CSSEGISandData/COVID-19/tree/master/csse_covid_19_data/csse_covid_19_time_series)
+  
+Temperature statistics has been retrieved by a web service provided by Meteorologisk Institutt [https://seklima.met.no/observations/](https://seklima.met.no/observations/) and uploaded to my own github repo
+
+```{r import_data}
+url_in <- "https://github.com/CSSEGISandData/COVID-19/raw/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv"
+global_cases <- read_csv(url_in, show_col_types = FALSE)
+
+url_in_met <- "https://raw.githubusercontent.com/novembererfin/DTSA5301/main/2022-09-02_temperature_Oslo_Blindern.csv"
+oslo_temp_read <- read_csv(url_in_met, show_col_types = FALSE)
+```
+### Some Data Definitions  
+  
+**Cases:** Number of cumulative cases since the start of the registration  
+**Temperature:** Average daily temperature in Celsius registered in Blindern Station, Oslo, Norway  
+**New_Cases:** Differences between number of cases that date and the day before  
+**Rel_New_Cases:** relation between New_Cases and the sum of New_Cases the preceding 10 days (an aproximate measure of active contagious cases) 
+
+## Reformat and clean up data
+```{r clean_data}
+norway_cases <- global_cases %>%
+  filter(global_cases$`Country/Region` == "Norway")
+  
+norway_cases <- norway_cases  %>% 
+  select(-c("Province/State", "Long", "Lat", "Country/Region"))
+
+norway_cases <- pivot_longer(norway_cases,cols = everything())
+colnames(norway_cases) <- c("Dates", "Cases")
+norway_cases <- norway_cases %>% 
+  mutate(Dates = mdy(Dates))
+
+oslo_temp <- oslo_temp_read  %>% select(-c("Navn", "Stasjon"))
+oslo_temp <- oslo_temp %>%
+  mutate(`Tid(norsk normaltid)` = dmy(`Tid(norsk normaltid)`))
+colnames(oslo_temp) <- c("Dates", "Temperature")
+
+
+cases_temp <- merge(x = norway_cases, y = oslo_temp, by = "Dates")
+cases_temp <- cases_temp %>%
+  mutate(New_Cases = Cases - lag(Cases))
+
+cases_temp$New_Cases[is.na(cases_temp$New_Cases)] <- 0
+
+cases_temp <- cases_temp %>%
+  mutate(Rel_New_Cases = New_Cases / (Cases - lag(Cases, n=10)))
+
+
+cases_temp$Rel_New_Cases[is.na(cases_temp$Rel_New_Cases)] <- 0
+```
+```{r first_summary_data}
+summary(cases_temp)
+```
+
+## Analysis
+### Data at a glance  
+Some key values:  
+
+```{r data_at_glance}
+max_new_cases <- cases_temp[which.max(cases_temp$New_Case),]
+paste("Average number of case per day: ", mean(cases_temp$Cases))
+paste("Average number of new cases per day: ", mean(cases_temp$New_Cases))
+paste("Maximum number of new cases per day: ", max(cases_temp$New_Cases))
+paste("Date with maximum number of cases: ", max_new_cases$Dates)
+paste("Highest average temperature measured in this period: ", max(cases_temp$Temperature))
+paste("Average temperature measured in this period: ", mean(cases_temp$Temperature))
+paste("Minimum average temperature measured in this period: ", min(cases_temp$Temperature))
+```
+
+### Visualizations  
+
+Confirmed cases per day (cumulative)
+```{r graph_cases_per_day}
+plot1 <- ggplot(cases_temp, mapping = aes(x = Dates)) +
+  geom_point(mapping = aes(y = Cases), color = "burlywood2") +
+  labs(title = "Number of Cases per day", x = "Dates", y = "Number of cases")
+plot1
+```
+
+Confirmed new cases per day
+```{r graph_new_cases_per_day}
+plot2 <- ggplot(cases_temp, mapping = aes(x = Dates)) +
+  geom_point(mapping = aes(y = New_Cases), color = "burlywood2") +
+  labs(title = "New Cases per day", x = "Dates", y = "Number of cases")
+plot2
+```
+Note that Norway removed all Covid-related measures on February 12, 2022. This may help explain the major spike during the beginning of 2022.
+
+Confirmed new cases per day relative to the total number of new cases the last 10 days
+```{r graph_rel_new_cases_per_day}
+plot_cases_temp <- cases_temp %>%
+  filter(cases_temp$Dates >= "2020-05-01")
+plot3 <- ggplot(plot_cases_temp, mapping = aes(x = Dates)) +
+  geom_point(mapping = aes(y = Rel_New_Cases), color = "burlywood2") +
+  labs(title = "Relative number of new Cases per day", x = "Dates", y = "Percentage of cases")
+plot3
+```
+
+## Making a model
+My hypothesis is that temperature is an important factor in promoting new cases. I use a linear model between new cases and temperature.
+```{r model_linear}
+model <- lm(Rel_New_Cases ~ Temperature, data = plot_cases_temp)
+summary(model)
+```
+
+Predictions: correlation (purple) vs real observations (light orange)
+```{r graph_corr_temp_new_cases}
+
+paste("Correlation coefficient: ", round(cor(plot_cases_temp$Temperature, plot_cases_temp$Rel_New_Cases), 2))
+plot4 <- ggplot(plot_cases_temp, mapping = aes(x = Temperature)) +
+  geom_point(mapping = aes(y = Rel_New_Cases), color = "burlywood2") +
+  geom_smooth(mapping = aes(y = Rel_New_Cases), method=lm, se = FALSE, color = "darkorchid3") +
+  labs(title = "New Cases per day", x = "Temperature", y = "Percentage of cases")
+plot4
+```
+
+From the graph, we can see that temperature is not correlated to the relative number of new cases
+
+Because temperature was not correlated I want to explore another factor - Mobility changes. I am using Region Mobility Reports from Google for Norway for 2020, 2021 and 2022.
+
+I will be using changes in mobility in transit stations and workplaces
+
+```{r read_mobility_data}
+url_in_mob <- "https://github.com/novembererfin/DTSA5301/raw/main/2020_NO_Region_Mobility_Report.csv"
+no_mob_read_2020 <- read_csv(url_in_mob, show_col_types = FALSE)
+
+url_in_mob <- "https://github.com/novembererfin/DTSA5301/raw/main/2021_NO_Region_Mobility_Report.csv"
+no_mob_read_2021 <- read_csv(url_in_mob, show_col_types = FALSE)
+
+url_in_mob <- "https://github.com/novembererfin/DTSA5301/raw/main/2022_NO_Region_Mobility_Report.csv"
+no_mob_read_2022 <- read_csv(url_in_mob, show_col_types = FALSE)
+
+no_mob_read <- rbind(no_mob_read_2020, no_mob_read_2021)
+no_mob_read <- rbind(no_mob_read, no_mob_read_2022)
+
+```
+
+**Some more definitions:**  
+**Mob_External:** Mean of transit station mobility changes and workplaces mobility changes   
+
+```{r clean_mobility_data}
+no_mob <- no_mob_read %>%
+  filter(is.na(sub_region_1))
+no_mob <- no_mob %>%
+  mutate(date = ymd(date))
+no_mob <- no_mob %>%
+  select(c("date", "transit_stations_percent_change_from_baseline","workplaces_percent_change_from_baseline"))
+
+colnames(no_mob) <- c("Dates", "Mob_Transit", "Mob_Workplaces")
+
+no_mob <- no_mob %>%
+  mutate(Mob_External = (Mob_Workplaces + Mob_Transit)/2)
+
+plot_cases_temp_mob <- merge(plot_cases_temp, no_mob, by = "Dates")
+```
+```{r visualize_mobility_data}
+paste("Correlation coefficient: ", round(cor(plot_cases_temp_mob$Mob_External, plot_cases_temp_mob$Rel_New_Cases), 2))
+plot5 <- ggplot(plot_cases_temp_mob, mapping = aes(x = Mob_External)) +
+  geom_point(mapping = aes(y = Rel_New_Cases), color = "burlywood2") +
+  geom_smooth(mapping = aes(y = Rel_New_Cases), method=lm, se = FALSE, color = "darkorchid3") +
+  labs(title = "New Cases per day", x = "Mobility", y = "Percentage of cases")
+plot5
+
+```
+There is a weak negative correlation between mobility in transit stations and workplaces and new cases. Initially this was not expected, but more can be explained in the Bias section. 
+
+## Bias
+Some bias that I have identified:  
+  
+1. The temperature data is from one station in Oslo while the rest of the data is about the whole country. Even Oslo is the biggest city in Norway, still can be other weather conditions in other cities. This is a result of constrains in the data sources used. In real life one could have used a dataset from the Norwegian Folkehelse Institutt (fhi.no).
+
+2. I haven't taken into account the time that goes between the person is infected, the appearance of the symptoms, testing and getting the results. In best case scenario it could be around 7 days, but more realistic, maybe 10 days. 
+
+3. In my alternative model with mobility, I used changes in workplace and transit station mobility as proxy measures for social contact. This may ignore the fact that usually higher mobility during summer months is often related to outdoors activities with lower risk of infection while mobility during the winter could result on the opposite.
+
+4. Last: when analyzing the effect of temperature I should have chosen a period of time that starts and ends the same day and month. My data has more samples from the summer months than winter months. 
+
+## Conclusions
+My conclusion is that temperature has not been a significant factor for the relative changes in the number of new cases of Covid 19 in Norway. This seems to be counter-intuitive since we can expect similar behavior than other respiratory diseases (influenza, colds, pnumonia, etc) that usually thrives during winter months. One possible explanation may be that sanitary regulations, social distancing, pubs/bars lockdown has a much bigger role are more relevant for infection that temperature/air conditions alone. 
+
+Other explanation can be that data scope is too wide and I should divide it between periods with strict sanitary measures i.e. from March-June 2020, November 2020 - March 2021 and periods without them as from February 2022-Today.
+
+Last I could have taking into account the dominant virus variant since epidemiologically they behaved different from the original Wuhan-variant, Delta and then Omicron. 
